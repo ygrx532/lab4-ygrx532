@@ -5,6 +5,9 @@ OBJS = mdriver.o memlib.o
 
 all: mdriver unittest implicit-unittest implicit-mdriver
 
+submitfiles: 
+	zip submitfiles.zip *.c *.h Makefile
+
 implicit-unittest: memlib.o mm-implicit.o mm-implicit-unittest.o
 	$(CC) $(CFLAGS) -o $@ $^
 
