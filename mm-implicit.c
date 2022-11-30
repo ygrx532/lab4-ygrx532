@@ -14,7 +14,7 @@
 
 // turn "debug" on while you are debugging correctness. 
 // Turn it off when you want to measure performance
-static bool debug = true; 
+static bool debug = false; 
 
 size_t hdr_size = sizeof(header_t);
 
@@ -32,7 +32,22 @@ init_chunk(header_t *p, size_t csz, bool allocated)
 header_t *
 next_chunk(header_t *h)
 {
-	//Your code here
+	if (h == NULL){
+		if (mem_heapsize()==0){
+			return NULL;
+		}else{
+			return mem_heap_lo();
+		}
+	}else{
+		header_t *ret_header = h;
+		ret_header += h->size / hdr_size;
+		if ((char *)ret_header >= (char *)mem_heap_hi()){
+			return NULL;
+		}else{
+			return ret_header;
+		}
+	}
+	
 }
 
 
@@ -56,7 +71,24 @@ int mm_init(void)
 header_t *
 first_fit(size_t csz)
 {
-	//Your code here
+	//Your code herheader_t 
+//	header_t *header = NULL;
+//	while (next_chunk(header) != NULL){
+//		if (next_chunk(header)->allocated == false && next_chunk(header)->size >= csz){
+//			return next_chunk(header);
+//		} 
+//		header = next_chunk(header);
+//	}
+//	return NULL;
+	header_t *header = next_chunk(NULL);
+	while (header != NULL){
+		if (header->allocated == false && header->size >= csz){
+			return header;
+		}
+		header = next_chunk(header);
+	}
+	return NULL;
+
 }
 
 // helper function split cuts the chunk into two chunks. The first chunk is of size "csz", 
@@ -66,6 +98,12 @@ void
 split(header_t *original, size_t csz)
 {
 	//Your code here
+	if (original->size > csz){
+		header_t *second_chunk = original+csz/16;
+		second_chunk->size = (original -> size) - csz;
+		second_chunk->allocated = false;
+		original->size = csz;
+	}
 }
 
 // helper function ask_os_for_chunk invokes the mem_sbrk function to ask for a chunk of 
@@ -74,7 +112,10 @@ split(header_t *original, size_t csz)
 header_t *
 ask_os_for_chunk(size_t csz)
 {
-	//Your code here
+	header_t *brk = mem_sbrk(csz);
+	brk->allocated = false;
+	brk->size = csz;
+	return brk;
 }
 
 /* 
@@ -88,7 +129,6 @@ mm_malloc(size_t size)
 	//chunk size is aligned because both payload and header sizes
 	//are aligned
 	size_t csz = hdr_size + align(size);
-
 	header_t *p = NULL;
 
 	//Your code here 
@@ -99,10 +139,22 @@ mm_malloc(size_t size)
 	//    If found, split the chunk (using helper function split).
 	//    If not found, ask OS for new memory using helper ask_os_for_chunk
 	//Set the chunk's status to be allocated
-
+	if (first_fit(csz) != NULL){
+		//printf("in a");
+		p = first_fit(csz);
+		if(p -> size > csz){
+			split(p, csz);
+		}	
+		
+	}else{
+		//printf("in b");
+		p = ask_os_for_chunk(csz);
+	}
 
 	//After finishing obtaining free chunk p, 
 	//check heap correctness to catch bugs
+	p -> allocated = true;
+	p = (void *)((char *)p+hdr_size);
 	if (debug) {
 		mm_checkheap(true);
 	}
@@ -115,7 +167,7 @@ header_t *
 payload2header(void *p)
 {
 	//Your code here
-
+	return (header_t *)((char *)p-hdr_size);
 }
 
 // Helper function coalesce merges free chunk h with subsequent 
@@ -125,6 +177,18 @@ void
 coalesce(header_t *h)
 {
 	//Your code here
+	//header_t *f = h
+	if (h->allocated == false){
+		size_t add_up_size = h -> size;
+		while (next_chunk(h) != NULL && next_chunk(h) -> allocated == false)
+		{
+		add_up_size += next_chunk(h) -> size;
+		//next_chunk(h) -> allocated = 0;
+		//next_chunk(h) -> size = 0;
+		h -> size = add_up_size;
+		}
+	}
+	
 }
 
 /*
@@ -139,8 +203,10 @@ mm_free(void *p)
 	// Obtain pointer to current chunk using helper payload_to_header 
 	// Set current chunk status to "free"
 	// Call coalesce() to merge current chunk with subsequent free chunks
-	  
-	  
+	//printf("in c");
+	header_t *h = payload2header(p);
+	h -> allocated = false;
+	coalesce(h);
 	// After freeing the chunk, check heap correctness to catch bugs
 	if (debug) {
 		mm_checkheap(true);
@@ -158,12 +224,39 @@ void *
 mm_realloc(void *ptr, size_t size)
 {
 	// Your code here
-	  
+	size = align(size);
+	size_t csz = hdr_size + align(size);
+	header_t *p = payload2header(ptr);
+	//header_t *t = p;
+	//printf("realloc");
+	if (ptr == NULL){
+		return mm_malloc(size);
+	}else{
+		if (size == 0){
+			mm_free(ptr);
+		}else{
+			p -> allocated = false;
+			coalesce(p);
+			if (csz < p->size){
+				//printf("in d");
+				split(p,csz);
+				p -> allocated = true;
+				return 	(void *)((char *)p+hdr_size);
+			}else{
+				//printf("in f");
+				header_t *dst = mm_malloc(csz-hdr_size);
+				p = memcpy((void *)dst, ptr, csz-hdr_size);
+				return (void *)p;
+			}
+		}
+		
+	}
 	// Check heap correctness after realloc to catch bugs
 	if (debug) {
 		mm_checkheap(true);
 	}
 	return NULL;
+
 }
 
 
@@ -179,7 +272,27 @@ mm_checkheap(bool verbose)
 	// Your code here
 	// 
 	// traverse the heap to fill in the fields of info
-
+	info.num_allocated_chunks=0;
+	info.num_free_chunks=0;
+	info.allocated_size=0;
+	info.free_size=0;
+	header_t *header = NULL;
+	while (next_chunk(header) != NULL){
+		if (next_chunk(header)->allocated==true){
+			info.num_allocated_chunks += 1;
+			info.allocated_size+=next_chunk(header)->size;
+		}else{
+			info.num_free_chunks+=1;
+			info.free_size+=next_chunk(header)->size;
+		}
+		header=next_chunk(header);
+	}
+	if (verbose){
+		printf("\nNumber of allocated chunks: %ld\n", (long)info.num_allocated_chunks);
+		printf("Number of free chunks: %ld\n", (long)info.num_free_chunks);
+		printf("Allocated size: %ld\n", (long)info.allocated_size);
+		printf("Free size: %ld\n", (long)info.free_size);
+	}
 	// correctness of implicit heap amounts to the following assertion.
 	assert(mem_heapsize() == (info.allocated_size + info.free_size));
 	return info;
